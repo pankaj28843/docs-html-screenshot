@@ -43,7 +43,7 @@
 
 **ALL code changes require validation loop**:
 ```bash
-uv sync --dev
+uv sync --extra dev
 uv run ruff format . && uv run ruff check --fix .
 uv run pytest tests/ -v
 ```
