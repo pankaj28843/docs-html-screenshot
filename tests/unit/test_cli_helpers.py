@@ -1,5 +1,6 @@
 import pytest
 from click.testing import CliRunner
+
 from docs_html_screenshot import cli
 
 
