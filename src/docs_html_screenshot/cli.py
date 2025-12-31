@@ -171,9 +171,7 @@ async def run(config: RunConfig) -> int:
 
             async def runner(path: Path) -> TaskResult:
                 async with sem:
-                    return await _process_file(
-                        context, config, port, config.input_dir, config.output_dir, path
-                    )
+                    return await _process_file(context, config, port, config.input_dir, config.output_dir, path)
 
             results = await asyncio.gather(*(runner(path) for path in html_files))
             await context.close()

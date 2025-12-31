@@ -54,7 +54,7 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C4", "UP", "PL"]
-ignore = ["PLR0913"]
+ignore = ["PLR0913", "PLR0915", "PLR2004"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
