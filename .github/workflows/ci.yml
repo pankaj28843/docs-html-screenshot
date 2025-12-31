@@ -1,79 +1,105 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-      
-      - name: Set up Python
-        run: uv python install 3.12
-      
-      - name: Install dependencies
-        run: uv sync --dev
-      
-      - name: Run ruff linter
-        run: uv run ruff check src/ tests/
-      
-      - name: Run ruff formatter check
-        run: uv run ruff format --check src/ tests/
-
   test:
+    name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
-    
     steps:
-      - uses: actions/checkout@v5
-      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-      
+        uses: astral-sh/setup-uv@v5
+
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
-      
+
       - name: Install dependencies
         run: uv sync --dev
-      
+
+      - name: Ruff format (check)
+        run: uv run ruff format . --check
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
       - name: Install Playwright browsers
         run: uv run playwright install chromium --with-deps
-      
+
       - name: Run tests
         run: uv run pytest tests/ -v
 
-  build:
+  build-and-push:
+    name: Build and push Docker (GHCR)
+    needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v5
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          version: "latest"
-      
-      - name: Set up Python
-        run: uv python install 3.12
-      
-      - name: Build package
-        run: uv build
-      
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          name: dist
-          path: dist/
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
