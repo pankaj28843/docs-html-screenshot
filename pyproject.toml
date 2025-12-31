@@ -1,0 +1,64 @@
+[project]
+name = "docs-html-screenshot"
+version = "0.1.0"
+description = "CLI tool to generate full-page screenshots of static HTML files using Playwright"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Pankaj Singh", email = "pankaj28843@gmail.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Documentation",
+    "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture",
+]
+dependencies = [
+    "click>=8.0.0",
+    "playwright>=1.55.0",
+]
+
+[project.scripts]
+docs-html-screenshot = "docs_html_screenshot.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+packages = ["src/docs_html_screenshot"]
+
+[project.urls]
+Homepage = "https://github.com/pankaj28843/docs-html-screenshot"
+"Bug Tracker" = "https://github.com/pankaj28843/docs-html-screenshot/issues"
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4.4",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "UP", "PL"]
+ignore = ["PLR0913"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "unit: fast isolated unit tests",
+]
