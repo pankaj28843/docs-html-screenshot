@@ -41,3 +41,6 @@ htmlcov/
 # Output
 tmp/
 screenshots/
+
+# AI agent plans (local only)
+.github/ai-agent-plans/
