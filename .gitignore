@@ -38,9 +38,6 @@ htmlcov/
 .tox/
 .nox/
 
-# uv
-uv.lock
-
 # Output
 tmp/
 screenshots/
