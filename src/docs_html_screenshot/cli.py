@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import fileinput
+import hashlib
 import os
 import socket
 import threading
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,10 +21,23 @@ DEFAULT_DEVICE_SCALE_FACTOR = 2
 DEFAULT_TIMEOUT_MS = 30000
 
 
+async def _with_timeout(coro, timeout_seconds: float):
+    """Run coroutine with a hard timeout and swallow cancelled-task errors."""
+    task = asyncio.create_task(coro)
+    try:
+        return await asyncio.wait_for(task, timeout_seconds)
+    except Exception:
+        task.cancel()
+        with suppress(Exception):
+            await task
+        raise
+
+
 @dataclass
 class RunConfig:
-    input_dir: Path
+    input_dir: Path | None
     output_dir: Path
+    urls: list[str] = field(default_factory=list)
     viewport_width: int = DEFAULT_VIEWPORT_WIDTH
     viewport_height: int = DEFAULT_VIEWPORT_HEIGHT
     device_scale_factor: int = DEFAULT_DEVICE_SCALE_FACTOR
@@ -37,7 +52,7 @@ class RunConfig:
 
 @dataclass
 class TaskResult:
-    source: Path
+    source: str | Path
     destination: Path
     errors: list[str]
 
@@ -52,6 +67,33 @@ def output_path_for(input_path: Path, input_root: Path, output_root: Path) -> Pa
     flat_name = str(relative).replace("/", "__").replace("\\", "__")
     target_name = flat_name + "-screenshot.png"
     return output_root / target_name
+
+
+def url_to_output_path(url: str, output_root: Path) -> Path:
+    sanitized = url.replace("://", "__").replace("/", "__").replace(":", "__").replace("?", "__q__")
+    if len(sanitized) > 200:
+        digest = hashlib.md5(url.encode("utf-8")).hexdigest()[:12]
+        sanitized = f"{sanitized[:150]}__{digest}"
+    return output_root / f"{sanitized}.png"
+
+
+def load_urls(url_flags: tuple[str, ...], urls_file: str | None) -> list[str]:
+    urls = [item for item in url_flags if item]
+    if urls_file:
+        try:
+            with fileinput.input(files=(urls_file,)) as handle:
+                for line in handle:
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith("#"):
+                        urls.append(stripped)
+        except OSError as exc:
+            raise click.ClickException(f"Failed to read URLs from {urls_file}: {exc}") from exc
+
+    # Preserve order while dropping duplicates
+    seen: dict[str, None] = {}
+    for item in urls:
+        seen.setdefault(item, None)
+    return list(seen.keys())
 
 
 def build_url(port: int, relative_path: Path) -> str:
@@ -79,13 +121,12 @@ def _stop_server(server: ThreadingHTTPServer, thread: threading.Thread) -> None:
     server.server_close()
 
 
-async def _process_file(
+async def _capture_target(
     context: BrowserContext,
     config: RunConfig,
-    server_port: int,
-    input_root: Path,
-    output_root: Path,
-    input_path: Path,
+    target_url: str,
+    output_path: Path,
+    source_label: str | Path,
 ) -> TaskResult:
     page = await context.new_page()
     console_errors: list[str] = []
@@ -115,18 +156,19 @@ async def _process_file(
     page.on("response", on_response)
     context.on("weberror", on_weberror)
 
-    output_path = output_path_for(input_path, input_root, output_root)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    relative = input_path.relative_to(input_root)
-    url = build_url(server_port, relative)
     navigation_error: str | None = None
+    timeout_seconds = max(0.001, config.timeout_ms / 1000)
 
     try:
-        await page.goto(url, wait_until="load", timeout=config.timeout_ms)
-        await page.wait_for_load_state("load", timeout=config.timeout_ms)
-        await page.screenshot(full_page=True, path=str(output_path))
-    except Exception as exc:
-        navigation_error = str(exc)
+        await _with_timeout(page.goto(target_url, wait_until="domcontentloaded"), timeout_seconds)
+        screenshot_bytes = await _with_timeout(page.screenshot(full_page=True), timeout_seconds)
+        output_path.write_bytes(screenshot_bytes)
+    except BaseException as exc:  # CancelledError may not derive from Exception in all py versions
+        if isinstance(exc, asyncio.CancelledError):
+            navigation_error = str(exc)
+        else:
+            navigation_error = str(exc)
     finally:
         with suppress(Exception):
             page.off("console", on_console)
@@ -147,17 +189,33 @@ async def _process_file(
         errors.extend(web_errors)
     if navigation_error:
         errors.append(f"navigation_error: {navigation_error}")
+    if not output_path.exists():
+        errors.append(f"screenshot_missing: {output_path}")
 
-    return TaskResult(source=input_path, destination=output_path, errors=errors)
+    return TaskResult(source=source_label, destination=output_path, errors=errors)
+
+
+def _apply_timeouts(context: BrowserContext, config: RunConfig) -> None:
+    """Apply per-context timeouts so every operation respects config.timeout_ms."""
+    with suppress(Exception):
+        context.set_default_navigation_timeout(config.timeout_ms)
 
 
 async def run(config: RunConfig) -> int:
-    html_files = discover_html_files(config.input_dir)
-    if not html_files:
-        click.echo("No HTML files found under input directory", err=True)
-        return 0
+    html_files = discover_html_files(config.input_dir) if config.input_dir else []
+    url_targets = config.urls
 
-    server, thread, port = _start_server(config.input_dir)
+    if not html_files and not url_targets:
+        click.echo("No inputs provided. Use --input or --url/--urls-file.", err=True)
+        return 1
+
+    server: ThreadingHTTPServer | None = None
+    thread: threading.Thread | None = None
+    port: int | None = None
+
+    if html_files and config.input_dir:
+        server, thread, port = _start_server(config.input_dir)
+
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=config.headless)
@@ -168,18 +226,31 @@ async def run(config: RunConfig) -> int:
                 },
                 device_scale_factor=config.device_scale_factor,
             )
+            _apply_timeouts(context, config)
 
-            sem = asyncio.Semaphore(config.concurrency)
+            sem = asyncio.Semaphore(max(1, config.concurrency))
 
-            async def runner(path: Path) -> TaskResult:
+            async def runner(source_label: str | Path, target_url: str, output_path: Path) -> TaskResult:
                 async with sem:
-                    return await _process_file(context, config, port, config.input_dir, config.output_dir, path)
+                    return await _capture_target(context, config, target_url, output_path, source_label)
 
-            results = await asyncio.gather(*(runner(path) for path in html_files))
+            jobs: list[asyncio.Future[TaskResult]] = []
+            if html_files and port is not None and config.input_dir:
+                for path in html_files:
+                    target_url = build_url(port, path.relative_to(config.input_dir))
+                    output_path = output_path_for(path, config.input_dir, config.output_dir)
+                    jobs.append(asyncio.ensure_future(runner(path, target_url, output_path)))
+
+            for target in url_targets:
+                output_path = url_to_output_path(target, config.output_dir)
+                jobs.append(asyncio.ensure_future(runner(target, target, output_path)))
+
+            results = await asyncio.gather(*jobs)
             await context.close()
             await browser.close()
     finally:
-        _stop_server(server, thread)
+        if server and thread:
+            _stop_server(server, thread)
 
     failures = [r for r in results if r.errors]
     for item in failures:
@@ -195,7 +266,7 @@ async def run(config: RunConfig) -> int:
     "--input",
     "input_dir",
     type=click.Path(path_type=Path, exists=True, file_okay=False),
-    required=True,
+    required=False,
     help="Input directory containing HTML files.",
 )
 @click.option(
@@ -204,6 +275,17 @@ async def run(config: RunConfig) -> int:
     type=click.Path(path_type=Path, file_okay=False),
     required=True,
     help="Output directory for screenshots.",
+)
+@click.option(
+    "--url",
+    "urls",
+    multiple=True,
+    help="URL to screenshot (repeatable).",
+)
+@click.option(
+    "--urls-file",
+    type=click.Path(path_type=Path, dir_okay=False, allow_dash=True),
+    help="File containing URLs (one per line). Use '-' for stdin.",
 )
 @click.option(
     "--viewport-width",
@@ -266,8 +348,10 @@ async def run(config: RunConfig) -> int:
     help="Fail build on web errors.",
 )
 def main(
-    input_dir: Path,
+    input_dir: Path | None,
     output_dir: Path,
+    urls: tuple[str, ...],
+    urls_file: Path | None,
     viewport_width: int,
     viewport_height: int,
     device_scale_factor: int,
@@ -279,11 +363,17 @@ def main(
     fail_on_pageerror: bool,
     fail_on_weberror: bool,
 ) -> None:
+    ctx = click.get_current_context()
+    urls_list = load_urls(urls, str(urls_file) if urls_file else None)
+    if input_dir is None and not urls_list:
+        raise click.UsageError("Provide --input or --url/--urls-file.", ctx=ctx)
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config = RunConfig(
         input_dir=input_dir,
         output_dir=output_dir,
+        urls=urls_list,
         viewport_width=viewport_width,
         viewport_height=viewport_height,
         device_scale_factor=device_scale_factor,

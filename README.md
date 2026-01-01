@@ -9,6 +9,12 @@
 
 A CLI tool that captures full-page screenshots of static HTML files (MkDocs, Sphinx, Hugo output). Built for feeding documentation renders to LLMs with vision capabilities—so you can ask "what's wrong with this layout?" and get actionable answers.
 
+**Audience:** Doc authors and developers who want fast, visual validation of static sites (MkDocs/Hugo/Sphinx) without manual browser work.
+
+**Fastest path:**
+- Have Docker? Use the one-liner below.
+- Want to test URL mode? See the real example with https://github.com/pankaj28843/article-extractor in the URL section.
+
 ## What Is This?
 
 **The problem:** You're writing MkDocs documentation, but you can't easily ask an LLM "does this page look right?" because LLMs need images, not HTML source.
@@ -47,9 +53,16 @@ You need **one of**:
 Pre-built images are available on GitHub Container Registry. No `docker build` required.
 
 ```bash
+
+# Minimal end-to-end
+docker run --rm --init --ipc=host \
+  -v "$PWD/site:/input:ro" \
+  -v "$PWD/screenshots:/output" \
+  ghcr.io/pankaj28843/docs-html-screenshot:latest \
+  --input /input --output /output
 # Pull the image (multi-arch: amd64/arm64)
 docker pull ghcr.io/pankaj28843/docs-html-screenshot:latest
-
+**Example output** (flat filenames for easy drag-and-drop):
 # Generate screenshots from your static site
 docker run --rm --init --ipc=host \
   -v "$PWD/site:/input:ro" \
@@ -90,9 +103,12 @@ Usage: docs-html-screenshot [OPTIONS]
 
 Options:
   --input DIRECTORY               Input directory containing HTML files.
-                                  [required]
+                                  (optional; use --url/--urls-file for remote pages)
   --output DIRECTORY              Output directory for screenshots.
                                   [required]
+  --url TEXT                      URL to screenshot (repeatable).
+  --urls-file FILE                File containing URLs (one per line). Use '-'
+                                  for stdin.
   --viewport-width INTEGER        Viewport width in pixels.  [default: 1920]
   --viewport-height INTEGER       Viewport height in pixels.  [default: 1020]
   --device-scale-factor INTEGER   Device scale factor for screenshots.
@@ -125,6 +141,38 @@ Options:
 | **Fast CI (lower quality)** | `--device-scale-factor 1 --concurrency 4` |
 | **Permissive mode** | `--allow-http-errors --allow-console-errors --allow-pageerror` |
 | **Debug rendering** | `--headed --concurrency 1 --timeout-ms 60000` |
+
+## URL Mode (NEW)
+
+Screenshot external pages without a local HTML directory:
+
+```bash
+# Single URL
+docs-html-screenshot --url https://example.com --output ./screenshots
+
+# Multiple URLs
+docs-html-screenshot --url https://example.com --url https://another.com --output ./screenshots
+
+# URLs from file (one per line)
+docs-html-screenshot --urls-file urls.txt --output ./screenshots
+
+# URLs from stdin
+cat urls.txt | docs-html-screenshot --urls-file - --output ./screenshots
+
+# Mixed mode: local directory + URLs
+docs-html-screenshot --input ./docs --url https://example.com --output ./screenshots
+
+# Real example: capture a GitHub repository page
+docs-html-screenshot --url https://github.com/pankaj28843/article-extractor --output ./screenshots
+# Expected file: ./screenshots/https__github.com__pankaj28843__article-extractor.png
+```
+
+**Example validation (Wikipedia):**
+
+```bash
+docs-html-screenshot --url https://en.wikipedia.org/wiki/Wikipedia --output ./screenshots
+# Expected file: ./screenshots/https__en.wikipedia.org__wiki__Wikipedia.png
+```
 
 ## Error Detection
 
