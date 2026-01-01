@@ -1,6 +1,6 @@
 [project]
 name = "docs-html-screenshot"
-version = "0.1.0"
+version = "0.1.1"
 description = "CLI tool to generate full-page screenshots of static HTML files using Playwright"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,7 +34,7 @@ docs-html-screenshot = "docs_html_screenshot.cli:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build]
+[tool.hatch.build.targets.wheel]
 packages = ["src/docs_html_screenshot"]
 
 [project.urls]
