@@ -58,12 +58,14 @@ docker run --rm --init --ipc=host \
   --input /input --output /output
 ```
 
-**Example output:**
+**Example output** (flat filenames for easy drag-and-drop):
 ```
 WROTE /output/index.html-screenshot.png
-WROTE /output/getting-started/index.html-screenshot.png
-WROTE /output/api/reference.html-screenshot.png
+WROTE /output/getting-started__index.html-screenshot.png
+WROTE /output/api__reference.html-screenshot.png
 ```
+
+All screenshots are output as flat files using `__` as the path separator—no nested directories. This makes it trivial to select all PNGs and drag them into an LLM chat.
 
 ## Quick Start (Local Installation)
 
@@ -148,18 +150,20 @@ By default, the tool fails (exit code 1) when any rendering error is detected. T
 
 ### Using Pre-built Images (Recommended)
 
-Images are automatically built and pushed to GHCR on every push to `main`:
+Images are automatically built and pushed to GHCR on every push to `main`. **Always use `:latest`** for the most up-to-date version:
 
 ```bash
-# Latest from main branch
+# Always use :latest (tracks main branch)
 docker pull ghcr.io/pankaj28843/docs-html-screenshot:latest
-
-# Specific version (when available)
-docker pull ghcr.io/pankaj28843/docs-html-screenshot:v0.1.0
-
-# Specific commit
-docker pull ghcr.io/pankaj28843/docs-html-screenshot:sha-abc1234
 ```
+
+**Available tags:**
+
+| Tag | When Updated |
+|-----|-------------|
+| `:latest` | Every push to `main` branch |
+| `:v0.1.0` | Semantic version releases |
+| `:sha-abc1234` | Specific commit SHA |
 
 ### Volume Mounting
 
@@ -247,6 +251,12 @@ docker run --rm --init --ipc=host \
 - File protocol (`file://`) has CORS restrictions that break many sites
 - Embedded server serves files on localhost, matching production behavior
 - Zero configuration—server starts/stops automatically
+
+### Why flat output filenames?
+
+- **Easy drag-and-drop**: Select all PNGs at once without navigating nested folders
+- **LLM-friendly**: Drop entire folder into Claude, ChatGPT, or Copilot Vision
+- **Path preserved**: Original path is encoded in filename (`docs/api/index.html` → `docs__api__index.html-screenshot.png`)
 
 ## Troubleshooting
 

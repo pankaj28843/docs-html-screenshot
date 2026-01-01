@@ -48,8 +48,10 @@ def discover_html_files(root: Path) -> list[Path]:
 
 def output_path_for(input_path: Path, input_root: Path, output_root: Path) -> Path:
     relative = input_path.relative_to(input_root)
-    target_name = relative.name + "-screenshot.png"
-    return output_root.joinpath(relative.parent, target_name)
+    # Flatten directory structure: use __ as separator for flat output
+    flat_name = str(relative).replace("/", "__").replace("\\", "__")
+    target_name = flat_name + "-screenshot.png"
+    return output_root / target_name
 
 
 def build_url(port: int, relative_path: Path) -> str:
