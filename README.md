@@ -5,33 +5,30 @@
 [![PyPI](https://img.shields.io/pypi/v/docs-html-screenshot)](https://pypi.org/project/docs-html-screenshot/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Generate full-page screenshots of static HTML files for visual documentation, testing, and LLM context.**
+**Screenshot your MkDocs site, feed it to GitHub Copilot, get instant visual feedback.**
 
-A CLI tool that scans a directory of HTML files (e.g., MkDocs `site/` output), serves them locally via an embedded HTTP server, and captures full-page screenshots using Playwright—with built-in error detection for broken links, failed assets, and JavaScript errors.
+A CLI tool that captures full-page screenshots of static HTML files (MkDocs, Sphinx, Hugo output). Built for feeding documentation renders to LLMs with vision capabilities—so you can ask "what's wrong with this layout?" and get actionable answers.
 
 ## What Is This?
 
-**The workflow:**
-1. You build your static site (MkDocs, Sphinx, Hugo, etc.)
-2. This tool scans the output directory for `.html` files
-3. Each page is loaded in a headless Chromium browser
-4. Full-page screenshots are saved as PNG files
-5. Any rendering errors (HTTP 4xx/5xx, console.error, JS exceptions) are detected and reported
+**The problem:** You're writing MkDocs documentation, but you can't easily ask an LLM "does this page look right?" because LLMs need images, not HTML source.
 
-**Primary use cases:**
-- **Visual regression testing** for documentation sites
-- **LLM vision context** — feed screenshots to multimodal models for analysis
-- **Design QA** — review how pages actually render vs. source markdown
-- **Archival** — create visual snapshots of documentation versions
+**The solution:** This tool screenshots every page in your built site. Drop those PNGs into GitHub Copilot (or any vision-capable LLM) and ask:
+- "Are there any rendering issues on this page?"
+- "How could I improve this layout?"
+- "Does the navigation look correct?"
+
+**How it works:**
+1. Build your static site (`mkdocs build`)
+2. Run this tool on the output directory
+3. Get PNG screenshots of every page
+4. Feed to LLM for visual analysis
+
+**Also useful for:** Visual regression testing, design QA, documentation archival.
 
 ## Who Is This For?
 
-| Audience | Use Case |
-|----------|----------|
-| **Documentation teams** | Automated visual testing in CI pipelines |
-| **DevOps engineers** | Screenshot generation as part of build workflows |
-| **Developers** | Quick visual review of static site output |
-| **AI/ML practitioners** | Generate visual context for multimodal LLMs |
+Developers who use MkDocs (or similar) and want to leverage LLM vision to review their documentation renders—without manually screenshotting each page.
 
 ### Prerequisites
 
