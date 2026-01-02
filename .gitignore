@@ -45,3 +45,6 @@ screenshots/
 # AI agent plans (local only)
 .github/ai-agent-plans/
 notes.md
+
+# Playwright
+.playwright-storage-state/

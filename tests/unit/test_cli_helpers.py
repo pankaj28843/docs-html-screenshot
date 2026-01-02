@@ -152,6 +152,10 @@ def test_run_config_defaults():
     assert config.fail_on_console is True
     assert config.fail_on_pageerror is True
     assert config.fail_on_weberror is True
+    assert config.user_agent is None
+    assert config.proxy is None
+    assert config.storage_state_path is None
+    assert config.user_interaction_timeout == cli.DEFAULT_USER_INTERACTION_TIMEOUT
 
 
 @pytest.mark.unit
@@ -161,6 +165,7 @@ async def test_capture_target_uses_config_timeout(tmp_path):
         def __init__(self):
             self.screenshot_kwargs = None
             self.goto_kwargs = None
+            self.events = []
 
         def on(self, *_args, **_kwargs):
             return None
@@ -173,6 +178,9 @@ async def test_capture_target_uses_config_timeout(tmp_path):
 
         async def wait_for_load_state(self, *_args, **_kwargs):
             return None
+
+        async def content(self):
+            return "stable"
 
         async def screenshot(self, **kwargs):
             self.screenshot_kwargs = kwargs
@@ -210,6 +218,128 @@ async def test_capture_target_uses_config_timeout(tmp_path):
     assert context.page.goto_kwargs is not None
     assert context.page.goto_kwargs["wait_until"] == "domcontentloaded"
     assert (tmp_path / "out.png").read_bytes() == b"img"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_capture_target_waits_for_dom_stability_before_screenshot(monkeypatch, tmp_path):
+    events: list[str] = []
+
+    async def fake_wait(page, *args, **kwargs):
+        events.append("dom-stable")
+        assert page is fake_context.page
+
+    monkeypatch.setattr(cli, "_wait_for_dom_stability", fake_wait)
+
+    class FakePage:
+        def __init__(self):
+            self.screenshot_taken = False
+            self.goto_kwargs = None
+
+        def on(self, *_args, **_kwargs):
+            return None
+
+        def off(self, *_args, **_kwargs):
+            return None
+
+        async def goto(self, *_args, **kwargs):
+            self.goto_kwargs = kwargs
+
+        async def screenshot(self, **_kwargs):
+            events.append("screenshot")
+            self.screenshot_taken = True
+            return b"img"
+
+        async def close(self):
+            return None
+
+    class FakeContext:
+        def __init__(self):
+            self.page = FakePage()
+
+        async def new_page(self):
+            return self.page
+
+        def on(self, *_args, **_kwargs):
+            return None
+
+        def off(self, *_args, **_kwargs):
+            return None
+
+    fake_context = FakeContext()
+    config = cli.RunConfig(input_dir=None, output_dir=tmp_path, urls=[], timeout_ms=1000)
+
+    await cli._capture_target(
+        fake_context,
+        config,
+        "https://example.com",
+        tmp_path / "out.png",
+        "example",
+    )
+
+    assert events == ["dom-stable", "screenshot"]
+    assert fake_context.page.screenshot_taken is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_wait_for_dom_stability_breaks_when_content_stops_changing():
+    class FakePage:
+        def __init__(self):
+            self.values = ["state-1", "state-2", "state-2", "state-2"]
+            self.index = 0
+            self.calls = 0
+
+        async def content(self):
+            self.calls += 1
+            value = self.values[self.index]
+            if self.index < len(self.values) - 1:
+                self.index += 1
+            return value
+
+    page = FakePage()
+
+    await cli._wait_for_dom_stability(page, max_checks=10, interval_seconds=0)
+
+    assert page.calls == 3  # stopped after detecting stability
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_wait_for_dom_stability_stops_after_max_checks():
+    class FlappingPage:
+        def __init__(self):
+            self.calls = 0
+
+        async def content(self):
+            self.calls += 1
+            return f"state-{self.calls}"
+
+    page = FlappingPage()
+
+    await cli._wait_for_dom_stability(page, max_checks=5, interval_seconds=0)
+
+    assert page.calls == 5
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_wait_for_dom_stability_logs_failure(monkeypatch):
+    class FailingPage:
+        async def content(self):  # pragma: no cover - exercised via helper
+            raise RuntimeError("boom")
+
+    captured: dict[str, str] = {}
+
+    def fake_echo(message, err=False):
+        captured["msg"] = message
+        captured["err"] = str(err)
+
+    monkeypatch.setattr(cli.click, "echo", fake_echo)
+
+    await cli._wait_for_dom_stability(FailingPage(), max_checks=1, interval_seconds=0)
+
+    assert "Failed to inspect page content" in captured.get("msg", "")
 
 
 @pytest.mark.unit
@@ -252,6 +382,33 @@ def test_click_help_runs_without_execution():
     assert "docs-html-screenshot" in result.output
 
 
+def test_determine_user_agent_prefers_explicit(monkeypatch):
+    monkeypatch.setattr(cli, "_build_random_user_agent", lambda: "random-agent")
+
+    assert cli._determine_user_agent("custom", True) == "custom"
+    assert cli._determine_user_agent(None, True) == "random-agent"
+    assert cli._determine_user_agent(None, False) is None
+
+
+@pytest.mark.unit
+def test_build_proxy_settings_uses_env_when_cli_missing():
+    env = {"HTTPS_PROXY": "http://proxy.local:9000", "NO_PROXY": "internal.local"}
+    settings = cli._build_proxy_settings(None, None, env)
+
+    assert settings is not None
+    data = settings.to_playwright_options()
+    assert data["server"] == "http://proxy.local:9000"
+    assert "internal.local" in data["bypass"]
+    assert "localhost" in data["bypass"]
+
+
+@pytest.mark.unit
+def test_resolve_storage_state_path_respects_toggle(tmp_path):
+    target = tmp_path / "storage.json"
+    assert cli._resolve_storage_state_path(True, target) == target
+    assert cli._resolve_storage_state_path(False, target) is None
+
+
 @pytest.mark.unit
 def test_cli_requires_output_option():
     runner = CliRunner()
@@ -284,13 +441,14 @@ def test_load_urls_combines_cli_and_file(tmp_path):
 
 @pytest.mark.unit
 def test_cli_accepts_url_without_input(monkeypatch):
-    called: dict[str, list[str]] = {}
+    called: dict[str, cli.RunConfig] = {}
 
     async def fake_run(config: cli.RunConfig) -> int:  # type: ignore[override]
-        called["urls"] = config.urls
+        called["config"] = config
         return 0
 
     monkeypatch.setattr(cli, "run", fake_run)
+    monkeypatch.setattr(cli, "_determine_user_agent", lambda *args, **_kwargs: "test-agent")
 
     runner = CliRunner()
     with runner.isolated_filesystem():
@@ -300,7 +458,12 @@ def test_cli_accepts_url_without_input(monkeypatch):
         )
 
     assert result.exit_code == 0
-    assert called["urls"] == ["https://example.com"]
+    config = called["config"]
+    assert config.urls == ["https://example.com"]
+    assert config.user_agent == "test-agent"
+    assert config.proxy is None
+    assert config.storage_state_path == cli.DEFAULT_STORAGE_STATE_PATH
+    assert config.user_interaction_timeout == cli.DEFAULT_USER_INTERACTION_TIMEOUT
 
 
 @pytest.mark.unit
@@ -310,6 +473,52 @@ def test_cli_requires_input_or_urls():
 
     assert result.exit_code != 0
     assert "Provide --input or --url/--urls-file." in result.output
+
+
+@pytest.mark.unit
+def test_cli_allows_proxy_and_storage_overrides(monkeypatch):
+    captured: dict[str, cli.RunConfig] = {}
+
+    async def fake_run(config: cli.RunConfig) -> int:  # type: ignore[override]
+        captured["config"] = config
+        return 0
+
+    monkeypatch.setattr(cli, "run", fake_run)
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.main,
+            [
+                "--url",
+                "https://example.com",
+                "--output",
+                "out",
+                "--user-agent",
+                "Custom-UA",
+                "--proxy-server",
+                "http://user:pass@proxy.local:8080",
+                "--proxy-bypass",
+                "intranet.local",
+                "--storage-state",
+                "state.json",
+                "--user-interaction-timeout",
+                "5",
+                "--headed",
+            ],
+        )
+
+    assert result.exit_code == 0
+    config = captured["config"]
+    assert config.user_agent == "Custom-UA"
+    assert config.storage_state_path is not None
+    assert config.storage_state_path.name == "state.json"
+    assert config.user_interaction_timeout == 5
+    assert config.headless is False
+    assert config.proxy is not None
+    proxy_dict = config.proxy.to_playwright_options()
+    assert proxy_dict["server"].startswith("http://proxy.local")
+    assert "bypass" in proxy_dict and "localhost" in proxy_dict["bypass"]
 
 
 @pytest.mark.unit

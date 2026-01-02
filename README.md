@@ -116,6 +116,18 @@ Options:
   --concurrency INTEGER           Number of concurrent pages.  [default: 10]
   --timeout-ms INTEGER            Navigation timeout in milliseconds.
                                   [default: 30000]
+  --user-agent TEXT               Explicit user agent string.
+  --random-user-agent / --no-random-user-agent
+                                  Generate a realistic user agent when one
+                                  is not provided.  [default: random-user-
+                                  agent]
+  --proxy-server TEXT             Proxy server for browser traffic (e.g.
+                                  http://user:pass@proxy:3128).
+  --proxy-bypass TEXT             Comma-separated hosts that bypass the
+                                  proxy (NO_PROXY is also honored).
+  --user-interaction-timeout INTEGER
+                                  Seconds to pause in headed mode before
+                                  capturing screenshots.  [default: 60]
   --headed / --headless           Run browser headed (default headless).
                                   [default: headless]
   --fail-on-http / --allow-http-errors
@@ -130,6 +142,11 @@ Options:
   --fail-on-weberror / --allow-weberror
                                   Fail build on web errors.  [default: fail-
                                   on-weberror]
+  --storage-state FILE            Path for persisted cookies/local storage.
+                                  [default: ~/.dhsu/storage_state.json]
+  --persist-storage / --no-persist-storage
+                                  Persist browser storage between runs.
+                                  [default: persist-storage]
   --help                          Show this message and exit.
 ```
 
@@ -141,6 +158,18 @@ Options:
 | **Fast CI (lower quality)** | `--device-scale-factor 1 --concurrency 4` |
 | **Permissive mode** | `--allow-http-errors --allow-console-errors --allow-pageerror` |
 | **Debug rendering** | `--headed --concurrency 1 --timeout-ms 60000` |
+
+### Avoiding Bot Checks
+
+- Add `--headed` to open a visible browser. The tool automatically pauses for `--user-interaction-timeout` seconds (default 60s) before capturing each page so you can solve CAPTCHAs or click "I'm not a robot" once.
+- Browser cookies, local storage, and IndexedDB contents are written to `~/.dhsu/storage_state.json` by default. Override with `--storage-state` or disable persistence via `--no-persist-storage` if you do not want state saved.
+- Because storage is persisted, you can unblock a site once in headed mode and then run future headless jobs that automatically reuse the granted session.
+
+### User Agents & Proxy Support
+
+- `docs-html-screenshot` now randomizes the user agent using `fake-useragent` so real-world CDNs treat the run like a typical desktop visitor. Supply `--user-agent` for a fixed string or disable randomness with `--no-random-user-agent` when deterministic screenshots matter.
+- Route traffic through corporate or residential proxies with `--proxy-server`. `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` environment variables are honored automatically, while `NO_PROXY` (plus `127.0.0.1/localhost`) is added to the bypass list so the embedded static-file server still works.
+- Pair `--proxy-bypass` with `--proxy-server` to whitelist additional hosts directly from the CLI.
 
 ## URL Mode (NEW)
 
