@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "click>=8.0.0",
     "playwright>=1.55.0",
+    "fake-useragent>=1.4.0",
 ]
 
 [project.scripts]
