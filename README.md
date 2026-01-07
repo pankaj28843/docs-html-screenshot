@@ -9,7 +9,13 @@
 
 A CLI tool that captures full-page screenshots of static HTML files (MkDocs, Sphinx, Hugo output). Built for feeding documentation renders to LLMs with vision capabilities—so you can ask "what's wrong with this layout?" and get actionable answers.
 
-**Audience:** Doc authors and developers who want fast, visual validation of static sites (MkDocs/Hugo/Sphinx) without manual browser work.
+**Audience**: Doc authors and developers who want fast visual validation of static sites without manual browser work.
+
+**Prerequisites**: Docker (recommended) or Python 3.10+ with `uv` or `pip`.
+
+**Time**: ~5 minutes for the first run.
+
+**What you'll learn**: How to capture full-page screenshots from local HTML output or URLs.
 
 **Fastest path:**
 - Have Docker? Use the one-liner below.
@@ -32,11 +38,7 @@ A CLI tool that captures full-page screenshots of static HTML files (MkDocs, Sph
 
 **Also useful for:** Visual regression testing, design QA, documentation archival.
 
-## Who Is This For?
-
-Developers who use MkDocs (or similar) and want to leverage LLM vision to review their documentation renders—without manually screenshotting each page.
-
-### Prerequisites
+### What You Need (Details)
 
 You need **one of**:
 - **Docker** (recommended) — zero setup, works anywhere
